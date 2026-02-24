@@ -1,96 +1,74 @@
 const { chromium } = require('playwright');
 
-const BASE_URL = 'http://inmate-search.cobbsheriff.org/enter_name.shtm';
-
-async function scrapeInmate(name, mode) {
+async function scrapeInmate(name) {
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
-  const context = await browser.newContext({
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36'
-  });
-
-  const page = await context.newPage();
+  const page = await browser.newPage();
 
   try {
-    // 🔹 Load search page
-    await page.goto(BASE_URL, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000
+    // 1️⃣ Go to search page
+    await page.goto(
+      'https://inmate-search.cobbsheriff.org/enter_name.shtm',
+      { waitUntil: 'domcontentloaded', timeout: 60000 }
+    );
+
+    // 2️⃣ Fill inmate name
+    await page.fill('input[name="inmate_name"]', name);
+
+    // 3️⃣ Select Inquiry
+    await page.selectOption('select[name="qry"]', {
+      label: 'Inquiry'
     });
 
-    // 🔹 DEBUG: capture page HTML immediately
-    const initialHtml = await page.content();
+    await page.waitForTimeout(500);
 
-    if (!initialHtml || initialHtml.length < 500) {
-      return {
-        found: false,
-        error: 'Page appears blocked or empty',
-        debugHtmlLength: initialHtml?.length || 0,
-        debugSnippet: initialHtml?.slice(0, 500)
-      };
-    }
-
-    // 🔹 Fill search form
-    await page.fill('input[name="inmate_name"]', name);
-    await page.selectOption('select[name="qry"]', mode);
-
+    // 4️⃣ Click Search
     await Promise.all([
       page.click('input[type="submit"]'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 })
     ]);
 
-    // 🔹 DEBUG: capture results page
-    const resultsHtml = await page.content();
+    // 5️⃣ Click "Last Known Booking"
+    await Promise.all([
+      page.click('input[value="Last Known Booking"]'),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 })
+    ]);
 
-    if (resultsHtml.length < 500) {
-      return {
-        found: false,
-        error: 'Results page blocked or empty',
-        debugHtmlLength: resultsHtml.length,
-        debugSnippet: resultsHtml.slice(0, 500)
-      };
-    }
+    // 6️⃣ Scrape detail page
+    const bookingData = await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('table tr'));
+      const data = {};
 
-    // 🔹 Check if inmate exists
-    const hasResults = await page.$('table');
+      rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length === 2) {
+          const key = cells[0].innerText.trim();
+          const value = cells[1].innerText.trim();
+          if (key && value) {
+            data[key] = value;
+          }
+        }
+      });
 
-    if (!hasResults) {
-      return {
-        found: false,
-        message: 'No inmate found',
-        debugHtmlLength: resultsHtml.length,
-        debugSnippet: resultsHtml.slice(0, 500)
-      };
-    }
+      return data;
+    });
 
-    // 🔹 Extract raw table rows
-    const allRows = await page.$$eval('table tr', rows =>
-      rows.map(row =>
-        Array.from(row.querySelectorAll('td')).map(td =>
-          td.innerText.trim()
-        )
-      )
-    );
+    await browser.close();
 
     return {
       found: true,
-      gotDetailPage: false,
-      pageData: { allRows },
-      name,
-      scrapedAt: new Date().toISOString()
+      data: bookingData
     };
 
-  } catch (err) {
+  } catch (error) {
+    await browser.close();
     return {
       found: false,
-      error: err.message
+      error: error.message
     };
-  } finally {
-    await browser.close();
   }
 }
 
