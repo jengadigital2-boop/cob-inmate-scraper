@@ -4,33 +4,29 @@ const { scrapeInmate } = require('./src/scraper');
 const app = express();
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.send('Cobb Inmate Scraper is running');
+});
+
 app.post('/scrape', async (req, res) => {
-  const token = req.headers['x-auth-token'];
-
-  if (!process.env.SCRAPER_AUTH_TOKEN) {
-    return res.status(500).json({
-      error: "SCRAPER_AUTH_TOKEN not set in environment"
-    });
-  }
-
-  if (!token || token !== process.env.SCRAPER_AUTH_TOKEN) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const { name, mode } = req.body;
-
-  if (!name) {
-    return res.status(400).json({ error: 'Name is required' });
-  }
-
   try {
-    const result = await scrapeInmate(name, mode || 'Inquiry');
+    const token = req.headers['x-auth-token'];
+
+    if (token !== process.env.SCRAPER_AUTH_TOKEN) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { name, mode } = req.body;
+
+    if (!name || !mode) {
+      return res.status(400).json({ error: 'Missing name or mode' });
+    }
+
+    const result = await scrapeInmate(name, mode);
     res.json(result);
+
   } catch (err) {
-    res.status(500).json({
-      error: true,
-      message: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
