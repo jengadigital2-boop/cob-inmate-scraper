@@ -1,21 +1,31 @@
 const { chromium } = require('playwright');
 
 async function scrapeInmate(name) {
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  });
-
-  const page = await browser.newPage();
+  let browser;
 
   try {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--single-process',
+        '--no-zygote'
+      ]
+    });
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
     // 1️⃣ Go to search page
     await page.goto(
       'https://inmate-search.cobbsheriff.org/enter_name.shtm',
       { waitUntil: 'domcontentloaded', timeout: 60000 }
     );
 
-    // 2️⃣ Fill inmate name
+    // 2️⃣ Fill name
     await page.fill('input[name="inmate_name"]', name);
 
     // 3️⃣ Select Inquiry
@@ -28,16 +38,22 @@ async function scrapeInmate(name) {
     // 4️⃣ Click Search
     await Promise.all([
       page.click('input[type="submit"]'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 })
+      page.waitForNavigation({
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      })
     ]);
 
     // 5️⃣ Click "Last Known Booking"
     await Promise.all([
-      page.click('input[value="Last Known Booking"]'),
-      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 })
+      page.click('text=Last Known Booking'),
+      page.waitForNavigation({
+        waitUntil: 'domcontentloaded',
+        timeout: 60000
+      })
     ]);
 
-    // 6️⃣ Scrape detail page
+    // 6️⃣ Scrape details
     const bookingData = await page.evaluate(() => {
       const rows = Array.from(document.querySelectorAll('table tr'));
       const data = {};
@@ -64,7 +80,10 @@ async function scrapeInmate(name) {
     };
 
   } catch (error) {
-    await browser.close();
+    if (browser) {
+      await browser.close();
+    }
+
     return {
       found: false,
       error: error.message
