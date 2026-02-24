@@ -1,9 +1,8 @@
 const { chromium } = require('playwright');
 
-const BASE_URL =
-  'http://inmate-search.cobbsheriff.org/enter_name.shtm';
+const BASE_URL = 'http://inmate-search.cobbsheriff.org/enter_name.shtm';
 
-async function scrapeInmate(name, mode = 'Inquiry') {
+async function scrapeInmate(name, mode) {
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -17,98 +16,81 @@ async function scrapeInmate(name, mode = 'Inquiry') {
   const page = await context.newPage();
 
   try {
-    // Go to search page
-    await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
-
-    // Fill name
-    await page.fill('input[name="inmate_name"]', name);
-
-    // Select Inquiry mode
-    await page.selectOption('select[name="qry"]', {
-      label: mode
+    // 🔹 Load search page
+    await page.goto(BASE_URL, {
+      waitUntil: 'domcontentloaded',
+      timeout: 30000
     });
 
-    // Submit form
-    await Promise.all([
-      page.waitForNavigation(),
-      page.click('input[type="submit"], input[value="Search"]')
-    ]);
+    // 🔹 DEBUG: capture page HTML immediately
+    const initialHtml = await page.content();
 
-    // Extract summary table
-    const summaryData = await page.$$eval('table tr', rows => {
-      const data = [];
-
-      rows.slice(1).forEach(row => {
-        const cols = row.querySelectorAll('td');
-        if (cols.length < 7) return;
-
-        data.push({
-          name: cols[1]?.innerText.trim(),
-          dob: cols[2]?.innerText.trim(),
-          race: cols[3]?.innerText.trim(),
-          sex: cols[4]?.innerText.trim(),
-          location: cols[5]?.innerText.trim(),
-          soid: cols[6]?.innerText.trim(),
-          daysInCustody: cols[7]?.innerText.trim()
-        });
-      });
-
-      return data;
-    });
-
-    if (!summaryData.length) {
-      await browser.close();
-      return { found: false };
-    }
-
-    // Click "Last Known Booking"
-    const bookingButton = await page.$(
-      'input[value="Last Known Booking"]'
-    );
-
-    if (!bookingButton) {
-      await browser.close();
+    if (!initialHtml || initialHtml.length < 500) {
       return {
-        found: true,
-        summary: summaryData,
-        gotDetailPage: false
+        found: false,
+        error: 'Page appears blocked or empty',
+        debugHtmlLength: initialHtml?.length || 0,
+        debugSnippet: initialHtml?.slice(0, 500)
       };
     }
 
+    // 🔹 Fill search form
+    await page.fill('input[name="inmate_name"]', name);
+    await page.selectOption('select[name="qry"]', mode);
+
     await Promise.all([
-      page.waitForNavigation(),
-      bookingButton.click()
+      page.click('input[type="submit"]'),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 })
     ]);
 
-    // Extract detail tables
-    const detailRows = await page.$$eval('table tr', rows =>
-      rows
-        .map(row =>
-          Array.from(row.querySelectorAll('td')).map(td =>
-            td.innerText.trim()
-          )
-        )
-        .filter(r => r.length > 0)
-    );
+    // 🔹 DEBUG: capture results page
+    const resultsHtml = await page.content();
 
-    await browser.close();
+    if (resultsHtml.length < 500) {
+      return {
+        found: false,
+        error: 'Results page blocked or empty',
+        debugHtmlLength: resultsHtml.length,
+        debugSnippet: resultsHtml.slice(0, 500)
+      };
+    }
+
+    // 🔹 Check if inmate exists
+    const hasResults = await page.$('table');
+
+    if (!hasResults) {
+      return {
+        found: false,
+        message: 'No inmate found',
+        debugHtmlLength: resultsHtml.length,
+        debugSnippet: resultsHtml.slice(0, 500)
+      };
+    }
+
+    // 🔹 Extract raw table rows
+    const allRows = await page.$$eval('table tr', rows =>
+      rows.map(row =>
+        Array.from(row.querySelectorAll('td')).map(td =>
+          td.innerText.trim()
+        )
+      )
+    );
 
     return {
       found: true,
-      summary: summaryData,
-      gotDetailPage: true,
-      pageData: {
-        allRows: detailRows
-      },
+      gotDetailPage: false,
+      pageData: { allRows },
+      name,
       scrapedAt: new Date().toISOString()
     };
 
   } catch (err) {
-    await browser.close();
     return {
-      error: true,
-      message: err.message
+      found: false,
+      error: err.message
     };
+  } finally {
+    await browser.close();
   }
 }
 
