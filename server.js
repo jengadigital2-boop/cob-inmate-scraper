@@ -1,4 +1,3 @@
-require('dotenv').config();
 const express = require('express');
 const { scrapeInmate } = require('./src/scraper');
 
@@ -7,6 +6,12 @@ app.use(express.json());
 
 app.post('/scrape', async (req, res) => {
   const token = req.headers['x-auth-token'];
+
+  if (!process.env.SCRAPER_AUTH_TOKEN) {
+    return res.status(500).json({
+      error: "SCRAPER_AUTH_TOKEN not set in environment"
+    });
+  }
 
   if (!token || token !== process.env.SCRAPER_AUTH_TOKEN) {
     return res.status(401).json({ error: 'Unauthorized' });
