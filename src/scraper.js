@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const BASE_URL =
   'http://inmate-search.cobbsheriff.org/enter_name.shtm';
 
-async function scrapeInmate(name, mode) {
+async function scrapeInmate(name, mode = 'Inquiry') {
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -17,19 +17,24 @@ async function scrapeInmate(name, mode) {
   const page = await context.newPage();
 
   try {
+    // Go to search page
     await page.goto(BASE_URL, { waitUntil: 'domcontentloaded' });
 
+    // Fill name
     await page.fill('input[name="inmate_name"]', name);
 
+    // Select Inquiry mode
     await page.selectOption('select[name="qry"]', {
       label: mode
     });
 
+    // Submit form
     await Promise.all([
       page.waitForNavigation(),
       page.click('input[type="submit"], input[value="Search"]')
     ]);
 
+    // Extract summary table
     const summaryData = await page.$$eval('table tr', rows => {
       const data = [];
 
@@ -56,6 +61,7 @@ async function scrapeInmate(name, mode) {
       return { found: false };
     }
 
+    // Click "Last Known Booking"
     const bookingButton = await page.$(
       'input[value="Last Known Booking"]'
     );
@@ -74,12 +80,15 @@ async function scrapeInmate(name, mode) {
       bookingButton.click()
     ]);
 
+    // Extract detail tables
     const detailRows = await page.$$eval('table tr', rows =>
-      rows.map(row =>
-        Array.from(row.querySelectorAll('td')).map(td =>
-          td.innerText.trim()
+      rows
+        .map(row =>
+          Array.from(row.querySelectorAll('td')).map(td =>
+            td.innerText.trim()
+          )
         )
-      ).filter(r => r.length > 0)
+        .filter(r => r.length > 0)
     );
 
     await browser.close();
